@@ -9,13 +9,12 @@ type QuestionType = "OPEN" | "MCQ";
 type SettingsQuestionType = "ALL" | "OPEN" | "MCQ";
 
 interface Props {
-  questions: Question[];
-  settings: GameSettings; // recebe também questionType via page.tsx (mesmo que types ainda não tenha)
+  questions: Question[]; // mantém prop (você usa em outros pontos), mas agora não é usada pra sorteio
+  settings: GameSettings;
   onExit: () => void;
 }
 
-export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => {
-  const [availableQuestions, setAvailableQuestions] = useState<Question[]>([]);
+export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
 
   // OPEN
@@ -27,6 +26,8 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
   const [timeLeft, setTimeLeft] = useState<number>(settings.timerDuration);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
 
+  const [isLoading, setIsLoading] = useState(false);
+
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -37,27 +38,64 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
   // ✅ tipo da questão atual (OPEN | MCQ)
   const questionType: QuestionType = (currentQuestion?.type ?? "OPEN") as QuestionType;
 
-  // init: filtra por dificuldade + tipo selecionado e embaralha
-  useEffect(() => {
-    const filtered = questions.filter((q) => {
-      const sameDifficulty = q.difficulty === settings.difficulty;
-      const qType = (q.type ?? "OPEN") as QuestionType;
+  // -----------------------------
+  // 🔥 Integração com backend
+  // -----------------------------
+  const fetchRandomQuestion = async (): Promise<Question | null> => {
+    const params = new URLSearchParams();
+    params.set("limit", "1");
+    params.set("difficulty", String(settings.difficulty));
 
-      const matchType = selectedType === "ALL" ? true : qType === selectedType;
-      return sameDifficulty && matchType;
+    // Se o backend ainda não filtra por type, ele só vai ignorar esse param (não quebra).
+    if (selectedType !== "ALL") params.set("type", selectedType);
+
+    const res = await fetch(`/api/questions/random?${params.toString()}`, {
+      cache: "no-store",
     });
 
-    const shuffled = [...filtered].sort(() => Math.random() - 0.5);
+    if (!res.ok) return null;
 
-    setAvailableQuestions(shuffled);
-    setCurrentQuestion(shuffled.length ? shuffled[0] : null);
+    const payload = await res.json().catch(() => null);
+    const q = payload?.data?.[0] ?? null;
+    return q as Question | null;
+  };
 
+  const markUsed = async (id: string | number) => {
+    // id pode vir como number ou string conforme seu type
+    const res = await fetch(`/api/questions/${id}/use`, { method: "POST" });
+    // 200 = marcou como usada
+    // 409 = já usada (ok, não precisa travar o jogo)
+    if (res.status === 409) return;
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null);
+      console.warn("Falha ao marcar pergunta como usada:", payload);
+    }
+  };
+
+  const loadNextQuestion = async () => {
+    setIsLoading(true);
+
+    // reset UI
     setGuess("");
     setFeedback(null);
     setShowCorrectAnswer(false);
+
     setTimeLeft(settings.timerDuration);
     setIsTimerRunning(false);
-  }, [questions, settings.difficulty, settings.timerDuration, selectedType]);
+
+    try {
+      const q = await fetchRandomQuestion();
+      setCurrentQuestion(q);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // init: ao entrar no jogo / trocar settings, busca do banco (sem repetir)
+  useEffect(() => {
+    loadNextQuestion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.difficulty, settings.timerDuration, selectedType]);
 
   // foco no input quando trocar pergunta (somente OPEN)
   useEffect(() => {
@@ -97,21 +135,18 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
     setTimeLeft(settings.timerDuration);
   };
 
-  const goNext = () => {
-    const nextList = availableQuestions.slice(1);
-    setAvailableQuestions(nextList);
+  // ✅ Próxima pergunta:
+  // Regra: só “queima” a pergunta quando ela foi respondida (acertou) OU quando revelou resposta.
+  const goNext = async () => {
+    if (!currentQuestion) return;
 
-    if (nextList.length) {
-      setCurrentQuestion(nextList[0]);
-      setGuess("");
-      setFeedback(null);
-      setShowCorrectAnswer(false);
+    const shouldConsume = feedback === "correct" || showCorrectAnswer;
 
-      setTimeLeft(settings.timerDuration);
-      setIsTimerRunning(false);
-    } else {
-      setCurrentQuestion(null);
+    if (shouldConsume) {
+      await markUsed(currentQuestion.id as any);
     }
+
+    await loadNextQuestion();
   };
 
   // OPEN: submit
@@ -177,22 +212,45 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
     return currentQuestion.answer;
   };
 
-  if (!currentQuestion) {
+  // ✅ Tela final (acabou perguntas disponíveis / ou carregando)
+  if (isLoading && !currentQuestion) {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-8 text-white">
-        <h2 className="text-4xl md:text-6xl font-black tracking-tight text-center">
-          Fim das perguntas desta categoria!
+        <h2 className="text-3xl md:text-5xl font-black tracking-tight text-center">
+          Carregando pergunta...
         </h2>
-        <button
-          onClick={onExit}
-          className="mt-10 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-bold text-xl transition-all cursor-pointer"
-          type="button"
-        >
-          Voltar ao Início
-        </button>
       </div>
     );
   }
+
+ if (!currentQuestion) {
+  const label =
+    selectedType === "OPEN"
+      ? "Abertas"
+      : selectedType === "MCQ"
+        ? "Múltiplas"
+        : "Todas";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-8 text-white">
+      <h2 className="text-4xl md:text-6xl font-black tracking-tight text-center">
+        Fim das perguntas desta categoria!
+      </h2>
+
+      <p className="mt-4 text-white/70 text-center">
+        Categoria: <b>{label}</b> • Dificuldade: <b>{settings.difficulty}</b>
+      </p>
+
+      <button
+        onClick={onExit}
+        className="mt-10 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-bold text-xl transition-all cursor-pointer"
+        type="button"
+      >
+        Voltar ao Início
+      </button>
+    </div>
+  );
+}
 
   const mcqOptions = (currentQuestion.options ?? []).slice(0, 4);
   const hasMcqOptions = questionType === "MCQ" ? mcqOptions.length > 0 : true;
@@ -233,7 +291,9 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
               <div className="bg-green-600 p-8 rounded-full shadow-2xl shadow-green-500/40 mb-6">
                 <Check size={120} strokeWidth={4} />
               </div>
-              <h2 className="text-7xl font-black uppercase tracking-tighter mb-12">Correto!</h2>
+              <h2 className="text-7xl font-black uppercase tracking-tighter mb-12">
+                Correto!
+              </h2>
 
               <button
                 onClick={goNext}
@@ -285,7 +345,9 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
             <>
               {!hasMcqOptions ? (
                 <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 text-slate-300">
-                  <p className="font-bold">Essa pergunta está como múltipla escolha, mas não possui alternativas.</p>
+                  <p className="font-bold">
+                    Essa pergunta está como múltipla escolha, mas não possui alternativas.
+                  </p>
                   <p className="text-sm text-slate-400 mt-2">
                     Vá em “Cadastrar Perguntas” e preencha as opções A, B, C e D.
                   </p>
@@ -306,7 +368,9 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
                           <span className="shrink-0 w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-300 font-black flex items-center justify-center">
                             {label}
                           </span>
-                          <p className="text-xl md:text-2xl font-semibold text-white/90">{opt}</p>
+                          <p className="text-xl md:text-2xl font-semibold text-white/90">
+                            {opt}
+                          </p>
                         </div>
                       </button>
                     );
@@ -322,7 +386,9 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
               <p className="text-slate-400 text-sm uppercase font-bold tracking-widest mb-2">
                 Resposta Correta
               </p>
-              <p className="text-4xl font-bold text-indigo-400">{getCorrectAnswerText()}</p>
+              <p className="text-4xl font-bold text-indigo-400">
+                {getCorrectAnswerText()}
+              </p>
             </div>
           )}
         </div>
@@ -345,7 +411,9 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
 
               <div
                 className={`text-8xl md:text-9xl font-mono font-black tabular-nums leading-none transition-all ${
-                  timeLeft <= 3 && timeLeft > 0 ? "text-rose-500 animate-pulse" : "text-white"
+                  timeLeft <= 3 && timeLeft > 0
+                    ? "text-rose-500 animate-pulse"
+                    : "text-white"
                 }`}
               >
                 {String(timeLeft).padStart(2, "0")}
@@ -355,7 +423,10 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
                 <div
                   className="h-full rounded-full transition-all duration-300"
                   style={{
-                    width: `${Math.max(0, Math.min(100, (timeLeft / settings.timerDuration) * 100))}%`,
+                    width: `${Math.max(
+                      0,
+                      Math.min(100, (timeLeft / settings.timerDuration) * 100)
+                    )}%`,
                     background:
                       timeLeft <= 3 && timeLeft > 0
                         ? "rgba(244, 63, 94, 0.9)"
