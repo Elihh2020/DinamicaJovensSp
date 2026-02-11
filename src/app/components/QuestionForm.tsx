@@ -12,24 +12,28 @@ interface QuestionFormProps {
   onDelete: (id: string) => void;
 }
 
+type QType = "OPEN" | "MCQ";
+
 export const QuestionForm: React.FC<QuestionFormProps> = ({
   questions,
   onAdd,
   onBack,
   onDelete,
 }) => {
+  // ====== CADASTRO ======
   const [text, setText] = useState("");
   const [answer, setAnswer] = useState("");
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.EASY);
 
-  const [questionType, setQuestionType] = useState<"OPEN" | "MCQ">("OPEN");
+  const [questionType, setQuestionType] = useState<QType>("OPEN");
   const [options, setOptions] = useState<string[]>(["", "", "", ""]);
   const [correctIndex, setCorrectIndex] = useState<number>(0);
 
-  // LISTA: abas por dificuldade
+  // ====== LISTA (FILTROS) ======
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(Difficulty.EASY);
+  const [selectedListType, setSelectedListType] = useState<QType>("OPEN"); // ✅ NOVO: aba "Abertas" ou "Múltiplas"
 
-  //Modal de exclusão
+  // ====== MODAL EXCLUSÃO ======
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; text: string } | null>(null);
 
@@ -50,7 +54,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     setPendingDelete(null);
   };
 
-  // UX: limpa campos quando trocar tipo
+  // ====== UX: limpa campos quando trocar tipo no cadastro ======
   useEffect(() => {
     if (questionType === "OPEN") {
       setOptions(["", "", "", ""]);
@@ -82,7 +86,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         type: "MCQ",
         options: trimmedOptions,
         correctIndex,
-        answer: correctText, // compatível com GameRunner
+        answer: correctText, // compatível com GameRunner (ele usa answer pra comparar)
       });
 
       // reset
@@ -111,36 +115,39 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     setQuestionType("OPEN");
   };
 
-  const deleteQuestion = (id: string) => {
-    onDelete(id);
-  };
-
   // ====== CONTADORES / FILTROS (LISTA) ======
   const levels = useMemo(() => Object.values(Difficulty) as Difficulty[], []);
 
   const totalAll = questions.length;
+
   const totalAllOpen = useMemo(
     () => questions.filter((q) => (q.type ?? "OPEN") === "OPEN").length,
     [questions]
   );
+
   const totalAllMcq = useMemo(
     () => questions.filter((q) => (q.type ?? "OPEN") === "MCQ").length,
     [questions]
   );
 
-  const getCountsForLevel = (level: Difficulty) => {
-    const list = questions.filter((q) => q.difficulty === level);
-    const open = list.filter((q) => (q.type ?? "OPEN") === "OPEN").length;
-    const mcq = list.filter((q) => (q.type ?? "OPEN") === "MCQ").length;
-    return { total: list.length, open, mcq };
+  // contadores por dificuldade, mas considerando o tipo selecionado na lista
+  const getCountsForLevelByType = (level: Difficulty, type: QType) => {
+    const list = questions.filter((q) => q.difficulty === level && (q.type ?? "OPEN") === type);
+    return { total: list.length };
   };
 
-  const filteredQuestions = useMemo(
-    () => questions.filter((q) => q.difficulty === selectedDifficulty),
-    [questions, selectedDifficulty]
-  );
+  // lista filtrada: por tipo (aba) + por dificuldade
+  const filteredQuestions = useMemo(() => {
+    return questions.filter(
+      (q) =>
+        q.difficulty === selectedDifficulty &&
+        (q.type ?? "OPEN") === selectedListType
+    );
+  }, [questions, selectedDifficulty, selectedListType]);
 
-  const selectedCounts = useMemo(() => getCountsForLevel(selectedDifficulty), [questions, selectedDifficulty]);
+  const selectedCounts = useMemo(() => {
+    return getCountsForLevelByType(selectedDifficulty, selectedListType);
+  }, [questions, selectedDifficulty, selectedListType]);
 
   const difficultyLabel =
     selectedDifficulty === Difficulty.EASY
@@ -157,6 +164,11 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     return "border-rose-600 bg-rose-50 text-rose-700";
   };
 
+  const typeTabStyle = (active: boolean) =>
+    active
+      ? "bg-slate-900 text-white border-slate-900"
+      : "bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-300";
+
   return (
     <div className="relative">
       <button
@@ -170,7 +182,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
       <div className="max-w-6xl mx-auto px-4">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-          {/* CARD 1 */}
+          {/* ================== CARD 1 (CADASTRO) ================== */}
           <div className="w-full p-6 bg-white rounded-xl shadow-xl border border-slate-100 fade-in">
             <div className="flex justify-between items-center mb-8">
               <h2 className="text-2xl font-bold text-slate-800">Cadastrar Nova Pergunta</h2>
@@ -297,7 +309,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             </form>
           </div>
 
-          {/* CARD 2 - LISTA COM ABAS */}
+          {/* ================== CARD 2 (LISTA) ================== */}
           <div className="w-full p-6 bg-white rounded-xl shadow-xl border border-slate-100 fade-in">
             <div className="flex items-start justify-between gap-4">
               <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -314,7 +326,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               </div>
             </div>
 
-            {/* Total geral por tipo */}
+            {/* chips (mantidos) */}
             <div className="mt-4 flex flex-wrap gap-2">
               <span className="px-3 py-1 rounded-full bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold">
                 Abertas: {totalAllOpen}
@@ -324,10 +336,39 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               </span>
             </div>
 
-            {/* Abas (botões) */}
+            {/* ✅ NOVO: botões para selecionar o TIPO que controla as dificuldades e a lista */}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedListType("OPEN")}
+                className={`rounded-2xl border-2 p-3 transition-all cursor-pointer ${typeTabStyle(
+                  selectedListType === "OPEN"
+                )}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-black uppercase tracking-wide text-sm">Abertas</span>
+                  <span className="text-lg font-black">{totalAllOpen}</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedListType("MCQ")}
+                className={`rounded-2xl border-2 p-3 transition-all cursor-pointer ${typeTabStyle(
+                  selectedListType === "MCQ"
+                )}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-black uppercase tracking-wide text-sm">Múltiplas</span>
+                  <span className="text-lg font-black">{totalAllMcq}</span>
+                </div>
+              </button>
+            </div>
+
+            {/* Abas (botões) de dificuldade - agora filtradas pelo tipo selecionado */}
             <div className="mt-6 grid grid-cols-3 gap-3">
               {levels.map((level) => {
-                const counts = getCountsForLevel(level);
+                const counts = getCountsForLevelByType(level, selectedListType);
                 const active = selectedDifficulty === level;
 
                 const label =
@@ -352,33 +393,32 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               })}
             </div>
 
-            {/* Resumo do nível selecionado */}
+            {/* Resumo (mantém design, mas agora é do tipo selecionado) */}
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
                   Selecionado:
                 </span>
-                <span className="text-sm font-black text-slate-800">{difficultyLabel}</span>
+                <span className="text-sm font-black text-slate-800">
+                  {selectedListType === "OPEN" ? "Abertas" : "Múltiplas"} • {difficultyLabel}
+                </span>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-sm font-bold">
                 <span className="px-3 py-1 rounded-full bg-white border border-slate-200">
                   Total: {selectedCounts.total}
                 </span>
-                <span className="px-3 py-1 rounded-full bg-white border border-slate-200">
-                  Abertas: {selectedCounts.open}
-                </span>
-                <span className="px-3 py-1 rounded-full bg-white border border-slate-200">
-                  Múltiplas: {selectedCounts.mcq}
-                </span>
               </div>
             </div>
 
-            {/* Lista filtrada */}
+            {/* Lista filtrada (tipo + dificuldade) */}
             <div className="max-h-96 overflow-y-auto space-y-4 pr-2 custom-scrollbar mt-6">
               {filteredQuestions.length === 0 ? (
                 <div className="bg-slate-100 border-2 border-dashed border-slate-200 p-12 text-center rounded-2xl">
-                  <p className="text-slate-400 italic">Nenhuma pergunta cadastrada nesse nível.</p>
+                  <p className="text-slate-400 italic">
+                    Nenhuma pergunta cadastrada para{" "}
+                    {selectedListType === "OPEN" ? "Abertas" : "Múltiplas"} • {difficultyLabel}.
+                  </p>
                 </div>
               ) : (
                 filteredQuestions.map((q) => (
@@ -430,6 +470,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MODAL EXCLUSÃO */}
       {confirmOpen && (
         <div
           className="fixed inset-0 z-[999] flex items-center justify-center p-4"

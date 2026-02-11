@@ -5,10 +5,12 @@ import { X, Check, Eye, ArrowLeft } from "lucide-react";
 import { Question, GameSettings } from "../types";
 
 type FeedbackType = "correct" | "wrong" | null;
+type QuestionType = "OPEN" | "MCQ";
+type SettingsQuestionType = "ALL" | "OPEN" | "MCQ";
 
 interface Props {
   questions: Question[];
-  settings: GameSettings;
+  settings: GameSettings; // recebe também questionType via page.tsx (mesmo que types ainda não tenha)
   onExit: () => void;
 }
 
@@ -28,11 +30,23 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const questionType = (currentQuestion?.type ?? "OPEN") as "OPEN" | "MCQ";
+  // ✅ tipo selecionado no App (ALL | OPEN | MCQ)
+  const selectedType: SettingsQuestionType =
+    ((settings as any).questionType as SettingsQuestionType) ?? "ALL";
 
-  // init: filtra por dificuldade e embaralha
+  // ✅ tipo da questão atual (OPEN | MCQ)
+  const questionType: QuestionType = (currentQuestion?.type ?? "OPEN") as QuestionType;
+
+  // init: filtra por dificuldade + tipo selecionado e embaralha
   useEffect(() => {
-    const filtered = questions.filter((q) => q.difficulty === settings.difficulty);
+    const filtered = questions.filter((q) => {
+      const sameDifficulty = q.difficulty === settings.difficulty;
+      const qType = (q.type ?? "OPEN") as QuestionType;
+
+      const matchType = selectedType === "ALL" ? true : qType === selectedType;
+      return sameDifficulty && matchType;
+    });
+
     const shuffled = [...filtered].sort(() => Math.random() - 0.5);
 
     setAvailableQuestions(shuffled);
@@ -43,7 +57,7 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
     setShowCorrectAnswer(false);
     setTimeLeft(settings.timerDuration);
     setIsTimerRunning(false);
-  }, [questions, settings.difficulty, settings.timerDuration]);
+  }, [questions, settings.difficulty, settings.timerDuration, selectedType]);
 
   // foco no input quando trocar pergunta (somente OPEN)
   useEffect(() => {
@@ -132,11 +146,11 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
         ? currentQuestion.correctIndex
         : -1;
 
+    const picked = (currentQuestion.options?.[idx] ?? "").trim().toLowerCase();
+    const correctAnswer = currentQuestion.answer.trim().toLowerCase();
+
     const isCorrect =
-      correctIdx >= 0
-        ? idx === correctIdx
-        : (currentQuestion.options?.[idx] ?? "").trim().toLowerCase() ===
-          currentQuestion.answer.trim().toLowerCase();
+      correctIdx >= 0 ? idx === correctIdx : picked === correctAnswer;
 
     if (isCorrect) {
       setFeedback("correct");
@@ -150,6 +164,7 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
 
   const getCorrectAnswerText = () => {
     if (!currentQuestion) return "";
+
     if (questionType === "MCQ") {
       const ci = currentQuestion.correctIndex;
       if (typeof ci === "number" && currentQuestion.options?.[ci]) {
@@ -158,6 +173,7 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
       }
       return currentQuestion.answer;
     }
+
     return currentQuestion.answer;
   };
 
@@ -178,6 +194,9 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
     );
   }
 
+  const mcqOptions = (currentQuestion.options ?? []).slice(0, 4);
+  const hasMcqOptions = questionType === "MCQ" ? mcqOptions.length > 0 : true;
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-between p-8 text-white select-none overflow-hidden">
       {/* Header Controls */}
@@ -188,7 +207,10 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
           aria-label="Voltar"
           type="button"
         >
-          <ArrowLeft size={32} className="group-hover:-translate-x-1 transition-transform cursor-pointer" />
+          <ArrowLeft
+            size={32}
+            className="group-hover:-translate-x-1 transition-transform cursor-pointer"
+          />
         </button>
       </div>
 
@@ -260,29 +282,38 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
 
           {/* MCQ */}
           {questionType === "MCQ" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {(currentQuestion.options ?? []).slice(0, 4).map((opt, idx) => {
-                const label = String.fromCharCode(65 + idx);
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => handlePickOption(idx)}
-                    disabled={feedback === "correct"}
-                    type="button"
-                    className="text-left bg-slate-900/50 hover:bg-slate-900/70 border border-slate-800 rounded-2xl p-5 transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="shrink-0 w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-300 font-black flex items-center justify-center">
-                        {label}
-                      </span>
-                      <p className="text-xl md:text-2xl font-semibold text-white/90">
-                        {opt}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              {!hasMcqOptions ? (
+                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 text-slate-300">
+                  <p className="font-bold">Essa pergunta está como múltipla escolha, mas não possui alternativas.</p>
+                  <p className="text-sm text-slate-400 mt-2">
+                    Vá em “Cadastrar Perguntas” e preencha as opções A, B, C e D.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {mcqOptions.map((opt, idx) => {
+                    const label = String.fromCharCode(65 + idx);
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handlePickOption(idx)}
+                        disabled={feedback === "correct"}
+                        type="button"
+                        className="text-left bg-slate-900/50 hover:bg-slate-900/70 border border-slate-800 rounded-2xl p-5 transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="shrink-0 w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-300 font-black flex items-center justify-center">
+                            {label}
+                          </span>
+                          <p className="text-xl md:text-2xl font-semibold text-white/90">{opt}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
 
           {/* Correct Answer Reveal */}
@@ -291,9 +322,7 @@ export const GameRunner: React.FC<Props> = ({ questions, settings, onExit }) => 
               <p className="text-slate-400 text-sm uppercase font-bold tracking-widest mb-2">
                 Resposta Correta
               </p>
-              <p className="text-4xl font-bold text-indigo-400">
-                {getCorrectAnswerText()}
-              </p>
+              <p className="text-4xl font-bold text-indigo-400">{getCorrectAnswerText()}</p>
             </div>
           )}
         </div>
