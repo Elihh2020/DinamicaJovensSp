@@ -1,3 +1,4 @@
+// src/app/api/questions/route.ts
 import { NextResponse } from "next/server";
 import { pool } from "@/app/lib/db";
 
@@ -73,8 +74,7 @@ export async function GET(req: Request) {
         answer,
         options,
         correct_index AS "correctIndex",
-        created_at AS "createdAt",
-        used_at AS "usedAt"
+        created_at AS "createdAt"
       FROM questions
       ${whereSql}
       ORDER BY created_at DESC
@@ -106,7 +106,10 @@ export async function POST(req: Request) {
     const body = (await req.json()) as CreateQuestionBody;
 
     if (!isNonEmptyString(body.text)) {
-      return NextResponse.json({ error: "Texto da pergunta é obrigatório." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Texto da pergunta é obrigatório." },
+        { status: 400 }
+      );
     }
 
     const dbType = toDbType(body.type);
@@ -138,14 +141,15 @@ export async function POST(req: Request) {
       answer = isNonEmptyString(body.answer) ? body.answer.trim() : trimmed[ci];
     } else {
       if (!isNonEmptyString(body.answer)) {
-        return NextResponse.json({ error: "Resposta é obrigatória para pergunta aberta." }, { status: 400 });
+        return NextResponse.json(
+          { error: "Resposta é obrigatória para pergunta aberta." },
+          { status: 400 }
+        );
       }
       answer = body.answer.trim();
     }
 
-    // ⚠️ Sobre o campo options:
-    // Se sua coluna `options` for JSONB: use JSON.stringify(options) e ::jsonb (como abaixo).
-    // Se sua coluna `options` for TEXT[]: troque para passar `options` direto e remova o ::jsonb.
+    // Coluna options é JSONB (como no seu seed)
     const insertQuery = `
       INSERT INTO questions (text, difficulty, type, answer, options, correct_index)
       VALUES ($1, $2, $3, $4, $5::jsonb, $6)
@@ -157,8 +161,7 @@ export async function POST(req: Request) {
         answer,
         options,
         correct_index AS "correctIndex",
-        created_at AS "createdAt",
-        used_at AS "usedAt"
+        created_at AS "createdAt"
     `;
 
     const insertValues = [
