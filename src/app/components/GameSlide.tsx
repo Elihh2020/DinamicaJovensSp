@@ -23,6 +23,9 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
   const [feedback, setFeedback] = useState<FeedbackType>(null);
   const [showCorrectAnswer, setShowCorrectAnswer] = useState(false);
 
+  // ✅ Timer ajustável (novo)
+  const [timerDuration, setTimerDuration] = useState<number>(settings.timerDuration);
+
   const [timeLeft, setTimeLeft] = useState<number>(settings.timerDuration);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
 
@@ -80,7 +83,8 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
     setFeedback(null);
     setShowCorrectAnswer(false);
 
-    setTimeLeft(settings.timerDuration);
+    // ✅ usa timerDuration ajustável (mudança)
+    setTimeLeft(timerDuration);
     setIsTimerRunning(false);
 
     try {
@@ -90,6 +94,13 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
       setIsLoading(false);
     }
   };
+
+  // ✅ quando settings.timerDuration mudar, sincroniza o timer ajustável (novo)
+  useEffect(() => {
+    setTimerDuration(settings.timerDuration);
+    setTimeLeft(settings.timerDuration);
+    setIsTimerRunning(false);
+  }, [settings.timerDuration]);
 
   // init: ao entrar no jogo / trocar settings, busca do banco (sem repetir)
   useEffect(() => {
@@ -124,7 +135,8 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
   }, [timeLeft, isTimerRunning]);
 
   const startTimer = () => {
-    if (timeLeft === 0) setTimeLeft(settings.timerDuration);
+    // ✅ usa timerDuration ajustável (mudança)
+    if (timeLeft === 0) setTimeLeft(timerDuration);
     setIsTimerRunning(true);
   };
 
@@ -132,7 +144,24 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
 
   const resetTimer = () => {
     setIsTimerRunning(false);
-    setTimeLeft(settings.timerDuration);
+    // ✅ usa timerDuration ajustável (mudança)
+    setTimeLeft(timerDuration);
+  };
+
+  // ✅ helper + ajuste de 1s (novo)
+  const clamp = (v: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, v));
+
+  const adjustTimerBy = (delta: number) => {
+    // regra simples: só ajusta quando pausado
+    if (isTimerRunning) return;
+
+    const nextDuration = clamp(timerDuration + delta, 1, 999);
+    setTimerDuration(nextDuration);
+
+    // mantém o timeLeft “acompanhando” o ajuste
+    const nextLeft = clamp(timeLeft + delta, 0, nextDuration);
+    setTimeLeft(nextLeft);
   };
 
   // ✅ Próxima pergunta:
@@ -223,34 +252,34 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
     );
   }
 
- if (!currentQuestion) {
-  const label =
-    selectedType === "OPEN"
-      ? "Abertas"
-      : selectedType === "MCQ"
-        ? "Múltiplas"
-        : "Todas";
+  if (!currentQuestion) {
+    const label =
+      selectedType === "OPEN"
+        ? "Abertas"
+        : selectedType === "MCQ"
+          ? "Múltiplas"
+          : "Todas";
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-8 text-white">
-      <h2 className="text-4xl md:text-6xl font-black tracking-tight text-center">
-        Fim das perguntas desta categoria!
-      </h2>
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-8 text-white">
+        <h2 className="text-4xl md:text-6xl font-black tracking-tight text-center">
+          Fim das perguntas desta categoria!
+        </h2>
 
-      <p className="mt-4 text-white/70 text-center">
-        Categoria: <b>{label}</b> • Dificuldade: <b>{settings.difficulty}</b>
-      </p>
+        <p className="mt-4 text-white/70 text-center">
+          Categoria: <b>{label}</b> • Dificuldade: <b>{settings.difficulty}</b>
+        </p>
 
-      <button
-        onClick={onExit}
-        className="mt-10 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-bold text-xl transition-all cursor-pointer"
-        type="button"
-      >
-        Voltar ao Início
-      </button>
-    </div>
-  );
-}
+        <button
+          onClick={onExit}
+          className="mt-10 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-bold text-xl transition-all cursor-pointer"
+          type="button"
+        >
+          Voltar ao Início
+        </button>
+      </div>
+    );
+  }
 
   const mcqOptions = (currentQuestion.options ?? []).slice(0, 4);
   const hasMcqOptions = questionType === "MCQ" ? mcqOptions.length > 0 : true;
@@ -405,18 +434,44 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
                   Cronômetro
                 </span>
                 <span className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-white/70 text-sm font-bold">
-                  {settings.timerDuration}s
+                  {/* ✅ mostra o timer ajustável */}
+                  {timerDuration}s
                 </span>
               </div>
 
-              <div
-                className={`text-8xl md:text-9xl font-mono font-black tabular-nums leading-none transition-all ${
-                  timeLeft <= 3 && timeLeft > 0
-                    ? "text-rose-500 animate-pulse"
-                    : "text-white"
-                }`}
-              >
-                {String(timeLeft).padStart(2, "0")}
+              {/* ✅ Número com botões - / + (mudança apenas aqui) */}
+              <div className="flex items-center justify-center gap-6">
+                <button
+                  onClick={() => adjustTimerBy(-1)}
+                  disabled={isTimerRunning || timerDuration <= 1}
+                  className="w-14 h-14 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/10 text-4xl font-black leading-none disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  type="button"
+                  aria-label="Diminuir 1 segundo"
+                  title="Diminuir 1s"
+                >
+                  −
+                </button>
+
+                <div
+                  className={`text-8xl md:text-9xl font-mono font-black tabular-nums leading-none transition-all ${
+                    timeLeft <= 3 && timeLeft > 0
+                      ? "text-rose-500 animate-pulse"
+                      : "text-white"
+                  }`}
+                >
+                  {String(timeLeft).padStart(2, "0")}
+                </div>
+
+                <button
+                  onClick={() => adjustTimerBy(1)}
+                  disabled={isTimerRunning}
+                  className="w-14 h-14 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/10 text-4xl font-black leading-none disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  type="button"
+                  aria-label="Aumentar 1 segundo"
+                  title="Aumentar 1s"
+                >
+                  +
+                </button>
               </div>
 
               <div className="w-[320px] max-w-[80vw] h-3 bg-white/5 rounded-full overflow-hidden border border-white/10">
@@ -425,7 +480,7 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
                   style={{
                     width: `${Math.max(
                       0,
-                      Math.min(100, (timeLeft / settings.timerDuration) * 100)
+                      Math.min(100, (timeLeft / timerDuration) * 100)
                     )}%`,
                     background:
                       timeLeft <= 3 && timeLeft > 0
@@ -469,7 +524,7 @@ export const GameRunner: React.FC<Props> = ({ settings, onExit }) => {
       </div>
 
       {/* Footer Actions */}
-      <div className="w-full flex justify-center py-4">
+      <div className="w-full flex justify-center py-6 pb-10">
         {!showCorrectAnswer && feedback !== "correct" && (
           <button
             onClick={() => setShowCorrectAnswer(true)}
